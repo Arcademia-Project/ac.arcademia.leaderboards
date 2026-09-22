@@ -1,0 +1,25 @@
+{
+  "name": "ac.arcademia.leaderboards",
+  "version": "1.0.0",
+  "displayName": "Arcademia Leaderboards SDK",
+  "description": "Submit high scores and let players claim them to their Arcademia account, from any Unity game running on an Arcademia arcade cabinet or on a developer's own machine (sandbox mode). See Runtime/README.md and the online SDK docs for full usage.",
+  "unity": "2021.3",
+  "license": "MIT",
+  "author": {
+    "name": "Arcademia",
+    "url": "https://manager.arcademia.ac"
+  },
+  "keywords": [
+    "arcademia",
+    "leaderboards",
+    "high-scores",
+    "arcade"
+  ],
+  "samples": [
+    {
+      "displayName": "Quick Start",
+      "description": "A single MonoBehaviour with an on-screen panel exercising every SDK call (ping, submit score, fetch test scores, claim). Drop it into any scene to try the SDK end to end.",
+      "path": "Samples~/QuickStart"
+    }
+  ]
+}
