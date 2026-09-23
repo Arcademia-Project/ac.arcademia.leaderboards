@@ -173,6 +173,93 @@ returns immediately with `Status = "rejected"`, since there's no cabinet
 to show a QR code on and test scores can't be claimed anyway. Feel free
 to call it unconditionally; it's a safe no-op in the editor.
 
+### `GetScoresAsync(boardSlug, query = null)` (returns `Task<ScoresResult>`)
+Loads a leaderboard to show in your game. You decide what comes back:
+which group of players to rank against, which positions to include, and
+whether to include the current player's own position with the players
+either side of them.
+
+There are four scopes (`LeaderboardScope`):
+
+| Scope | Ranks against |
+| --- | --- |
+| `Local` | Scores set on the cabinet the game is running on |
+| `Institutional` | Scores from every cabinet at the same institution |
+| `Country` | Scores from every cabinet in the same country |
+| `Global` | Every Arcademia cabinet |
+
+The cabinet, institution and country are worked out on the server from
+the play session, so there's nothing to pass in for them. The country
+comes from the site the cabinet belongs to.
+
+Build a request with `ScoreQuery`:
+
+```csharp
+var query = ScoreQuery.For(LeaderboardScope.Country)
+    .Top(10)
+    .AroundPlayer(result.ScoreId, before: 2, after: 2);
+
+var board = await ArcademiaLeaderboards.GetScoresAsync("highscore", query);
+if (board.Success)
+{
+    foreach (var s in board.Scores)
+        Debug.Log($"#{s.Rank} {s.PlayerName} {s.Value}");
+
+    if (board.Player != null)
+        Debug.Log($"You are #{board.Player.Rank} of {board.Total}");
+}
+```
+
+| Method | What it does |
+| --- | --- |
+| `ScoreQuery.For(scope)` | Start a query for a scope. `new ScoreQuery()` defaults to `Global`. |
+| `.Top(n)` | Ranks 1 to n. `Top(0)` asks for no ranked list at all. |
+| `.Range(from, to)` / `.Rank(n)` | Add a block of positions or a single one. Chain as many as you like, e.g. `.Top(3).Rank(10).Range(50, 55)`. |
+| `.WithRanks("1-3,10,50-55")` | Same thing written as a string. `"none"` means no ranked list. |
+| `.NoRanks()` | Skip the ranked list, handy when you only want the player's position. |
+| `.AroundPlayer(scoreId, before, after)` | Find the player's position using the `ScoreId` from `SubmitScoreAsync`, plus up to 50 scores either side. |
+| `.EveryScore()` | Rank every submission instead of each player's best. |
+| `.WithScope(scope)` | Copy the query with a different scope. |
+
+If you leave the ranks out, you get the top of the board up to its
+display cap (10 on a cabinet, 25 in sandbox, if no cap is set). A
+request can cover up to 200 positions.
+
+`ScoresResult` gives you `Scores` (the positions you asked for, in rank
+order), `Player` (the player's own row, or `null` if you didn't pass a
+score id or it isn't in this scope), `Around` (the player and their
+neighbours, in rank order), `Total` (how many ranked entries the scope
+has), and `Scope`. Each `BoardScore` has `Rank`, `PlayerName`, `Value`,
+`AchievedAt`, `Claimed`, `IsPlayer`, `MachineName`, `SiteName` and
+`Country`.
+
+For a quick top ten there's a shorter overload:
+
+```csharp
+var local = await ArcademiaLeaderboards.GetScoresAsync("highscore", LeaderboardScope.Local, 10);
+```
+
+### `GetScoresForScopesAsync(boardSlug, query = null, params scopes)` (returns `Task<Dictionary<LeaderboardScope, ScoresResult>>`)
+Runs the same query once per scope, which is what you want for a
+leaderboard screen with a tab per scope. Leave `scopes` empty to get all
+four.
+
+```csharp
+var tabs = await ArcademiaLeaderboards.GetScoresForScopesAsync(
+    "highscore",
+    new ScoreQuery().Top(10).AroundPlayer(result.ScoreId, 1, 1));
+
+ShowTab("This cabinet", tabs[LeaderboardScope.Local]);
+ShowTab("Everyone",     tabs[LeaderboardScope.Global]);
+```
+
+Each scope is its own request and can fail on its own, so check
+`Success` on each result.
+
+In sandbox mode these calls read your test scores. Test scores don't
+come from a cabinet, so every scope returns the same list, but the
+request and the result look exactly the same as they will on a cabinet.
+
 ### `GetTestScoresAsync(boardSlug, limit = 25, offset = 0)` (returns `Task<TestScoresResult>`)
 Reads back scores from the sandbox test area, i.e. whatever you or
 another dev submitted while not on a cabinet. Only works in sandbox mode

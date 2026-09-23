@@ -95,6 +95,11 @@ namespace Arcademia.Leaderboards
         public string playerName;
         public long value;
         public string achievedAt;
+        public bool claimed;
+        public bool isPlayer;
+        public string machineName;
+        public string siteName;
+        public string country;
     }
 
     [Serializable]
@@ -103,5 +108,20 @@ namespace Arcademia.Leaderboards
         public BoardDto board;
         public int total;
         public ScoreRowDto[] scores;
+    }
+
+    [Serializable]
+    internal class ScoresDto
+    {
+        public bool ok = true;
+        public string error;
+        public string message;
+        public BoardDto board;
+        public string scope;
+        public string mode;
+        public int total;
+        public ScoreRowDto[] scores;
+        public ScoreRowDto player;
+        public ScoreRowDto[] around;
     }
 }

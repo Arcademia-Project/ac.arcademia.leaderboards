@@ -80,7 +80,7 @@ namespace Arcademia.Leaderboards
                         if (finished != exchange)
                         {
                             Reset();
-                            exchange.ContinueWith(t => { var _ = t.Exception; }, TaskContinuationOptions.OnlyOnFaulted);
+                            _ = exchange.ContinueWith(t => { var _ = t.Exception; }, TaskContinuationOptions.OnlyOnFaulted);
                             throw new TimeoutException("The launcher did not respond in time.");
                         }
 

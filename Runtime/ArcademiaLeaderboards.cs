@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Net.Http;
@@ -246,7 +247,7 @@ namespace Arcademia.Leaderboards
             try
             {
                 var path = "/api/Sdk/Leaderboards/" + Uri.EscapeDataString(boardSlug)
-                    + "/scores?limit=" + limit.ToString(CultureInfo.InvariantCulture)
+                    + "/scores?mode=all&limit=" + limit.ToString(CultureInfo.InvariantCulture)
                     + "&offset=" + offset.ToString(CultureInfo.InvariantCulture);
 
                 var response = await SandboxTransport.SendAsync(
@@ -256,16 +257,7 @@ namespace Arcademia.Leaderboards
                     return new TestScoresResult { Success = false, Message = Describe(response) };
 
                 var dto = JsonUtility.FromJson<TestScoresDto>(response.Body);
-                var rows = dto.scores ?? new ScoreRowDto[0];
-                var scores = new BoardScore[rows.Length];
-                for (var i = 0; i < rows.Length; i++)
-                    scores[i] = new BoardScore
-                    {
-                        Rank = rows[i].rank,
-                        PlayerName = rows[i].playerName,
-                        Value = rows[i].value,
-                        AchievedAt = rows[i].achievedAt,
-                    };
+                var scores = ToBoardScores(dto.scores);
 
                 return new TestScoresResult
                 {
@@ -280,6 +272,137 @@ namespace Arcademia.Leaderboards
             {
                 return new TestScoresResult { Success = false, Message = ex.Message };
             }
+        }
+
+        public static Task<ScoresResult> GetScoresAsync(string boardSlug, LeaderboardScope scope, int top = 10) =>
+            GetScoresAsync(boardSlug, ScoreQuery.For(scope).Top(top));
+
+        public static async Task<ScoresResult> GetScoresAsync(string boardSlug, ScoreQuery query = null)
+        {
+            EnsureInitialised();
+            query = query ?? new ScoreQuery();
+
+            if (string.IsNullOrEmpty(boardSlug))
+                return new ScoresResult { Success = false, Message = "boardSlug is required.", Mode = Mode, Scope = query.Scope };
+
+            try
+            {
+                ScoresDto dto;
+                ArcademiaMode mode;
+                var scopeName = ScopeName(query.Scope);
+                var modeName = query.BestPerPlayer ? "best" : "all";
+
+                if (_launcher != null)
+                {
+                    mode = ArcademiaMode.Launcher;
+                    var fields = "\"boardSlug\":" + ArcademiaJson.Quote(boardSlug)
+                        + ",\"apiKey\":" + ArcademiaJson.Quote(_settings.apiKey ?? "")
+                        + ",\"scope\":" + ArcademiaJson.Quote(scopeName)
+                        + ",\"mode\":" + ArcademiaJson.Quote(modeName)
+                        + ",\"before\":" + query.Before.ToString(CultureInfo.InvariantCulture)
+                        + ",\"after\":" + query.After.ToString(CultureInfo.InvariantCulture);
+                    if (query.Ranks != null)
+                        fields += ",\"ranks\":" + ArcademiaJson.Quote(query.Ranks);
+                    if (!string.IsNullOrEmpty(query.PlayerScoreId))
+                        fields += ",\"scoreId\":" + ArcademiaJson.Quote(query.PlayerScoreId);
+
+                    var raw = await _launcher.SendAsync("getScores", fields);
+                    dto = JsonUtility.FromJson<ScoresDto>(raw);
+
+                    if (!dto.ok)
+                        return new ScoresResult { Success = false, Message = dto.message ?? dto.error, Mode = mode, Scope = query.Scope };
+                }
+                else
+                {
+                    mode = ArcademiaMode.Sandbox;
+                    var path = "/api/Sdk/Leaderboards/" + Uri.EscapeDataString(boardSlug)
+                        + "/scores?scope=" + scopeName
+                        + "&mode=" + modeName
+                        + "&before=" + query.Before.ToString(CultureInfo.InvariantCulture)
+                        + "&after=" + query.After.ToString(CultureInfo.InvariantCulture);
+                    if (query.Ranks != null)
+                        path += "&ranks=" + Uri.EscapeDataString(query.Ranks);
+                    if (!string.IsNullOrEmpty(query.PlayerScoreId))
+                        path += "&scoreId=" + Uri.EscapeDataString(query.PlayerScoreId);
+
+                    var response = await SandboxTransport.SendAsync(
+                        HttpMethod.Get, _settings.apiBase, path, _settings.apiKey, null);
+
+                    if (!response.IsSuccess)
+                        return new ScoresResult { Success = false, Message = Describe(response), Mode = mode, Scope = query.Scope };
+
+                    dto = JsonUtility.FromJson<ScoresDto>(response.Body);
+                }
+
+                return new ScoresResult
+                {
+                    Success = true,
+                    Mode = mode,
+                    BoardSlug = dto.board?.slug,
+                    BoardName = dto.board?.name,
+                    Scope = query.Scope,
+                    BestPerPlayer = dto.mode != "all",
+                    Total = dto.total,
+                    Scores = ToBoardScores(dto.scores),
+                    Player = dto.player != null && dto.player.rank > 0 ? ToBoardScore(dto.player) : null,
+                    Around = ToBoardScores(dto.around),
+                };
+            }
+            catch (Exception ex)
+            {
+                return new ScoresResult { Success = false, Message = ex.Message, Mode = Mode, Scope = query.Scope };
+            }
+        }
+
+        public static async Task<Dictionary<LeaderboardScope, ScoresResult>> GetScoresForScopesAsync(
+            string boardSlug,
+            ScoreQuery query = null,
+            params LeaderboardScope[] scopes)
+        {
+            query = query ?? new ScoreQuery();
+            if (scopes == null || scopes.Length == 0)
+                scopes = new[] { LeaderboardScope.Local, LeaderboardScope.Institutional, LeaderboardScope.Country, LeaderboardScope.Global };
+
+            var results = new Dictionary<LeaderboardScope, ScoresResult>();
+            foreach (var scope in scopes)
+                if (!results.ContainsKey(scope))
+                    results[scope] = await GetScoresAsync(boardSlug, query.WithScope(scope));
+            return results;
+        }
+
+        private static string ScopeName(LeaderboardScope scope)
+        {
+            switch (scope)
+            {
+                case LeaderboardScope.Local: return "local";
+                case LeaderboardScope.Institutional: return "institutional";
+                case LeaderboardScope.Country: return "country";
+                default: return "global";
+            }
+        }
+
+        private static BoardScore ToBoardScore(ScoreRowDto row) =>
+            new BoardScore
+            {
+                Rank = row.rank,
+                PlayerName = row.playerName,
+                Value = row.value,
+                AchievedAt = row.achievedAt,
+                Claimed = row.claimed,
+                IsPlayer = row.isPlayer,
+                MachineName = row.machineName,
+                SiteName = row.siteName,
+                Country = row.country,
+            };
+
+        private static BoardScore[] ToBoardScores(ScoreRowDto[] rows)
+        {
+            if (rows == null)
+                return new BoardScore[0];
+            var scores = new BoardScore[rows.Length];
+            for (var i = 0; i < rows.Length; i++)
+                scores[i] = ToBoardScore(rows[i]);
+            return scores;
         }
 
         private const int ClaimResponseTimeoutMs = 6 * 60 * 1000;
