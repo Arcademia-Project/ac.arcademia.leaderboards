@@ -71,6 +71,25 @@ namespace Arcademia.Leaderboards
         public string error;
         public string mode;
         public string sessionId;
+        public string playerName;
+        public bool claimed;
+    }
+
+    [Serializable]
+    internal class SandboxClaimDto
+    {
+        public string claimUrl;
+        public string code;
+        public string expiresAt;
+    }
+
+    [Serializable]
+    internal class NameResponseDto
+    {
+        public string status;
+        public string scoreId;
+        public string playerName;
+        public bool claimed;
     }
 
     [Serializable]
@@ -100,6 +119,7 @@ namespace Arcademia.Leaderboards
         public string machineName;
         public string siteName;
         public string country;
+        public string metadata;
     }
 
     [Serializable]

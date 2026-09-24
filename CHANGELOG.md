@@ -3,6 +3,17 @@
 All notable changes to the Arcademia Leaderboards SDK are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.2.0] - 2026-09-24
+
+### Added
+- `SetPlayerNameAsync(scoreId, playerName)` to name a score after it was submitted, so players can either type a name or claim the score to their account.
+- `ClaimResult.PlayerName` with the account's username when a claim succeeds, plus `ClaimResult.ScoreId` and `ClaimResult.ClaimUrl`.
+- `BoardScore.Metadata`, the JSON you submitted with a score, returned on every read.
+- `RequestClaimAsync` now works in sandbox mode. You get a link to open in your browser instead of a QR code, passed to the new `onClaimLink` parameter and written to the log. It also takes an optional `CancellationToken`.
+
+### Changed
+- `RequestClaimAsync` no longer returns `rejected` straight away in sandbox mode.
+
 ## [1.1.0] - 2026-09-23
 
 ### Added

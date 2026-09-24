@@ -95,11 +95,26 @@ namespace Arcademia.Leaderboards.Samples
             try
             {
                 var metadata = string.IsNullOrWhiteSpace(_metadata) ? null : _metadata;
-                var result = await ArcademiaLeaderboards.SubmitScoreAsync(_boardSlug, value, _playerName, metadata);
+                var result = await ArcademiaLeaderboards.SubmitScoreAsync(_boardSlug, value, null, metadata);
                 if (result.Success && !string.IsNullOrEmpty(result.ScoreId))
                     _lastScoreId = result.ScoreId;
                 Append(result.ToString());
             }
+            finally { _busy = false; }
+        }
+
+        private async void RunName()
+        {
+            if (_busy) return;
+            if (string.IsNullOrEmpty(_lastScoreId))
+            {
+                Append("Submit a score first.");
+                return;
+            }
+            _busy = true;
+            ApplySettings();
+            Append("Naming " + _lastScoreId + " as \"" + _playerName + "\"...");
+            try { Append((await ArcademiaLeaderboards.SetPlayerNameAsync(_lastScoreId, _playerName)).ToString()); }
             finally { _busy = false; }
         }
 
@@ -114,7 +129,7 @@ namespace Arcademia.Leaderboards.Samples
             _busy = true;
             ApplySettings();
             Append("Requesting claim for " + _lastScoreId + "...");
-            try { Append((await ArcademiaLeaderboards.RequestClaimAsync(_lastScoreId)).ToString()); }
+            try { Append((await ArcademiaLeaderboards.RequestClaimAsync(_lastScoreId, url => Append("Open this link to claim: " + url))).ToString()); }
             finally { _busy = false; }
         }
 
@@ -136,7 +151,7 @@ namespace Arcademia.Leaderboards.Samples
                 var sb = new StringBuilder();
                 sb.Append(result.BoardName).Append(" (").Append(result.Total).Append(" test scores)");
                 foreach (var s in result.Scores)
-                    sb.Append("\n    #").Append(s.Rank).Append("  ").Append(s.PlayerName).Append("  ").Append(s.Value);
+                    sb.Append("\n    #").Append(s.Rank).Append("  ").Append(s.PlayerName).Append(s.Claimed ? " (account)" : "").Append("  ").Append(s.Value);
                 Append(sb.ToString());
             }
             finally { _busy = false; }
@@ -185,6 +200,7 @@ namespace Arcademia.Leaderboards.Samples
             if (GUILayout.Button("Submit random", button, GUILayout.Height(34)))
                 RunSubmit(UnityEngine.Random.Range(100, 100000));
             if (GUILayout.Button("Fetch test scores", button, GUILayout.Height(34))) RunFetch();
+            if (GUILayout.Button("Name last score", button, GUILayout.Height(34))) RunName();
             if (GUILayout.Button("Claim last score", button, GUILayout.Height(34))) RunClaim();
             GUI.enabled = true;
             if (GUILayout.Button("Clear log", button, GUILayout.Height(34))) _log.Clear();

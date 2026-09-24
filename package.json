@@ -1,6 +1,6 @@
 {
   "name": "ac.arcademia.leaderboards",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "displayName": "Arcademia Leaderboards SDK",
   "description": "Submit high scores and let players claim them to their Arcademia account, from any Unity game running on an Arcademia arcade cabinet or on a developer's own machine (sandbox mode). See Runtime/README.md and the online SDK docs for full usage.",
   "unity": "2021.3",

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Net.Http;
+using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
 
@@ -393,6 +394,7 @@ namespace Arcademia.Leaderboards
                 MachineName = row.machineName,
                 SiteName = row.siteName,
                 Country = row.country,
+                Metadata = string.IsNullOrEmpty(row.metadata) ? null : row.metadata,
             };
 
         private static BoardScore[] ToBoardScores(ScoreRowDto[] rows)
@@ -407,7 +409,10 @@ namespace Arcademia.Leaderboards
 
         private const int ClaimResponseTimeoutMs = 6 * 60 * 1000;
 
-        public static async Task<ClaimResult> RequestClaimAsync(string scoreId)
+        public static async Task<ClaimResult> RequestClaimAsync(
+            string scoreId,
+            Action<string> onClaimLink = null,
+            CancellationToken cancellationToken = default)
         {
             EnsureInitialised();
 
@@ -415,13 +420,7 @@ namespace Arcademia.Leaderboards
                 return new ClaimResult { Success = false, Status = "error", Message = "scoreId is required.", Mode = Mode };
 
             if (_launcher == null)
-                return new ClaimResult
-                {
-                    Success = false,
-                    Status = "rejected",
-                    Message = "Claiming a score requires running through the Arcademia launcher.",
-                    Mode = ArcademiaMode.Sandbox,
-                };
+                return await SandboxClaimAsync(scoreId, onClaimLink, cancellationToken);
 
             try
             {
@@ -436,6 +435,7 @@ namespace Arcademia.Leaderboards
                     {
                         Success = false,
                         Status = "error",
+                        ScoreId = scoreId,
                         Message = dto.message ?? dto.error,
                         Mode = ArcademiaMode.Launcher,
                     };
@@ -444,13 +444,188 @@ namespace Arcademia.Leaderboards
                 {
                     Success = dto.status == "saved",
                     Status = dto.status,
+                    ScoreId = scoreId,
+                    PlayerName = string.IsNullOrEmpty(dto.playerName) ? null : dto.playerName,
                     Message = dto.message,
                     Mode = ArcademiaMode.Launcher,
                 };
             }
             catch (Exception ex)
             {
-                return new ClaimResult { Success = false, Status = "error", Message = ex.Message, Mode = ArcademiaMode.Launcher };
+                return new ClaimResult { Success = false, Status = "error", ScoreId = scoreId, Message = ex.Message, Mode = ArcademiaMode.Launcher };
+            }
+        }
+
+        private const int SandboxClaimPollMs = 2000;
+
+        private static async Task<ClaimResult> SandboxClaimAsync(
+            string scoreId, Action<string> onClaimLink, CancellationToken cancellationToken)
+        {
+            string code = null;
+            string claimUrl = null;
+            try
+            {
+                var path = "/api/Sdk/Scores/" + Uri.EscapeDataString(scoreId) + "/Claim";
+                var response = await SandboxTransport.SendAsync(
+                    HttpMethod.Post, _settings.apiBase, path, _settings.apiKey, "{}");
+
+                if (!response.IsSuccess)
+                    return new ClaimResult
+                    {
+                        Success = false,
+                        Status = "rejected",
+                        ScoreId = scoreId,
+                        Message = Describe(response),
+                        Mode = ArcademiaMode.Sandbox,
+                    };
+
+                var created = JsonUtility.FromJson<SandboxClaimDto>(response.Body);
+                code = created.code;
+                claimUrl = created.claimUrl;
+                var expiresAt = DateTime.TryParse(
+                    created.expiresAt, CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal, out var parsed)
+                    ? parsed
+                    : DateTime.UtcNow.AddMinutes(5);
+
+                Debug.Log("[Arcademia] Open this link to claim the test score: " + claimUrl);
+                onClaimLink?.Invoke(claimUrl);
+
+                var statusBody = "{\"code\":" + ArcademiaJson.Quote(code) + "}";
+                while (true)
+                {
+                    await Task.Delay(SandboxClaimPollMs, cancellationToken);
+
+                    var poll = await SandboxTransport.SendAsync(
+                        HttpMethod.Post, _settings.apiBase, "/api/Sdk/Claims/Status", _settings.apiKey, statusBody);
+
+                    if (poll.IsSuccess)
+                    {
+                        var state = JsonUtility.FromJson<NameResponseDto>(poll.Body);
+                        if (state.status != "pending")
+                            return new ClaimResult
+                            {
+                                Success = state.status == "saved",
+                                Status = state.status,
+                                ScoreId = scoreId,
+                                PlayerName = string.IsNullOrEmpty(state.playerName) ? null : state.playerName,
+                                ClaimUrl = claimUrl,
+                                Mode = ArcademiaMode.Sandbox,
+                            };
+                    }
+                    else if (DateTime.UtcNow > expiresAt.AddSeconds(30))
+                    {
+                        return new ClaimResult
+                        {
+                            Success = false,
+                            Status = "expired",
+                            ScoreId = scoreId,
+                            ClaimUrl = claimUrl,
+                            Message = Describe(poll),
+                            Mode = ArcademiaMode.Sandbox,
+                        };
+                    }
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                if (!string.IsNullOrEmpty(code))
+                {
+                    try
+                    {
+                        await SandboxTransport.SendAsync(
+                            HttpMethod.Delete, _settings.apiBase, "/api/Sdk/Claims", _settings.apiKey,
+                            "{\"code\":" + ArcademiaJson.Quote(code) + "}");
+                    }
+                    catch (Exception)
+                    {
+                    }
+                }
+
+                return new ClaimResult
+                {
+                    Success = false,
+                    Status = "cancelled",
+                    ScoreId = scoreId,
+                    ClaimUrl = claimUrl,
+                    Mode = ArcademiaMode.Sandbox,
+                };
+            }
+            catch (Exception ex)
+            {
+                return new ClaimResult { Success = false, Status = "error", ScoreId = scoreId, ClaimUrl = claimUrl, Message = ex.Message, Mode = ArcademiaMode.Sandbox };
+            }
+        }
+
+        public static async Task<NameResult> SetPlayerNameAsync(string scoreId, string playerName)
+        {
+            EnsureInitialised();
+
+            if (string.IsNullOrEmpty(scoreId))
+                return new NameResult { Success = false, Status = "error", Message = "scoreId is required.", Mode = Mode };
+
+            try
+            {
+                if (_launcher != null)
+                {
+                    var fields = "\"scoreId\":" + ArcademiaJson.Quote(scoreId)
+                        + ",\"apiKey\":" + ArcademiaJson.Quote(_settings.apiKey ?? "");
+                    if (!string.IsNullOrEmpty(playerName))
+                        fields += ",\"playerName\":" + ArcademiaJson.Quote(playerName);
+
+                    var raw = await _launcher.SendAsync("setPlayerName", fields);
+                    var dto = JsonUtility.FromJson<LauncherResponseDto>(raw);
+
+                    if (!dto.ok)
+                        return new NameResult
+                        {
+                            Success = false,
+                            Status = "error",
+                            ScoreId = scoreId,
+                            Message = dto.message ?? dto.error,
+                            Mode = ArcademiaMode.Launcher,
+                        };
+
+                    return new NameResult
+                    {
+                        Success = dto.status == "saved" || dto.status == "queued",
+                        Status = dto.status,
+                        ScoreId = scoreId,
+                        PlayerName = string.IsNullOrEmpty(dto.playerName) ? null : dto.playerName,
+                        Message = dto.message,
+                        Mode = ArcademiaMode.Launcher,
+                    };
+                }
+
+                var body = string.IsNullOrEmpty(playerName)
+                    ? "{}"
+                    : "{\"playerName\":" + ArcademiaJson.Quote(playerName) + "}";
+                var path = "/api/Sdk/Scores/" + Uri.EscapeDataString(scoreId) + "/Name";
+                var response = await SandboxTransport.SendAsync(
+                    HttpMethod.Post, _settings.apiBase, path, _settings.apiKey, body);
+
+                if (!response.IsSuccess)
+                    return new NameResult
+                    {
+                        Success = false,
+                        Status = "rejected",
+                        ScoreId = scoreId,
+                        Message = Describe(response),
+                        Mode = ArcademiaMode.Sandbox,
+                    };
+
+                var named = JsonUtility.FromJson<NameResponseDto>(response.Body);
+                return new NameResult
+                {
+                    Success = true,
+                    Status = "saved",
+                    ScoreId = scoreId,
+                    PlayerName = named.playerName,
+                    Mode = ArcademiaMode.Sandbox,
+                };
+            }
+            catch (Exception ex)
+            {
+                return new NameResult { Success = false, Status = "error", ScoreId = scoreId, Message = ex.Message, Mode = Mode };
             }
         }
 

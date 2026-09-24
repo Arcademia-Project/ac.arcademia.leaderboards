@@ -128,6 +128,7 @@ namespace Arcademia.Leaderboards
         public string MachineName;
         public string SiteName;
         public string Country;
+        public string Metadata;
     }
 
     public class ScoresResult
@@ -165,10 +166,30 @@ namespace Arcademia.Leaderboards
     {
         public bool Success;
         public string Status;
+        public string ScoreId;
+        public string PlayerName;
+        public string ClaimUrl;
         public string Message;
         public ArcademiaMode Mode;
 
         public override string ToString() =>
-            $"[{Mode}] {Status}" + (string.IsNullOrEmpty(Message) ? "" : $" - {Message}");
+            $"[{Mode}] {Status}"
+            + (string.IsNullOrEmpty(PlayerName) ? "" : $" as \"{PlayerName}\"")
+            + (string.IsNullOrEmpty(Message) ? "" : $" - {Message}");
+    }
+
+    public class NameResult
+    {
+        public bool Success;
+        public string Status;
+        public string ScoreId;
+        public string PlayerName;
+        public string Message;
+        public ArcademiaMode Mode;
+
+        public override string ToString() =>
+            $"[{Mode}] {Status}"
+            + (string.IsNullOrEmpty(PlayerName) ? "" : $" \"{PlayerName}\"")
+            + (string.IsNullOrEmpty(Message) ? "" : $" - {Message}");
     }
 }
